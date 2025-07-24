@@ -40,6 +40,11 @@ if (version_compare(get_bloginfo('version'), '6.8', '<') || version_compare(PHP_
     return;
 }
 
+// Check if WordPress is properly loaded
+if (!function_exists('add_action') || !function_exists('register_activation_hook')) {
+    return;
+}
+
 // Autoloader for classes
 spl_autoload_register(function ($class) {
     if (strpos($class, 'PostTemplateManager\\') === 0) {
@@ -59,6 +64,10 @@ spl_autoload_register(function ($class) {
             $file = PTM_PLUGIN_DIR . 'includes/' . $class_map[$class];
             if (file_exists($file)) {
                 require_once $file;
+            } else {
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log("Post Template Manager: Class file not found: $file");
+                }
             }
         }
     }
@@ -102,12 +111,28 @@ class PostTemplateManager
     public function init()
     {
         try {
+            // Check if all required classes can be loaded
+            $required_classes = [
+                'PostTemplateManager\\Core\\PostType',
+                'PostTemplateManager\\Core\\Taxonomy',
+                'PostTemplateManager\\Admin\\AdminInterface',
+                'PostTemplateManager\\Frontend\\TemplateSelector',
+                'PostTemplateManager\\Core\\Ajax'
+            ];
+            
+            foreach ($required_classes as $class) {
+                if (!class_exists($class)) {
+                    throw new Exception("Required class not found: $class");
+                }
+            }
+            
             // Initialize core classes
             new PostTemplateManager\Core\PostType();
             new PostTemplateManager\Core\Taxonomy();
             new PostTemplateManager\Admin\AdminInterface();
             new PostTemplateManager\Frontend\TemplateSelector();
             new PostTemplateManager\Core\Ajax();
+            
         } catch (Exception $e) {
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 error_log('Post Template Manager initialization error: ' . $e->getMessage());
