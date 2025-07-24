@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3-beta] - 2025-07-25
+### Changed
+- Manual config and changelog edits for improved Release Please compatibility and workflow reliability.
+
 ## [1.0.2-beta](https://github.com/jp-pelegrino/post-template-manager/compare/v1.0.1-beta...v1.0.2-beta) (2025-07-24)
 
 
