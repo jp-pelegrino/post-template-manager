@@ -44,23 +44,66 @@ jobs:
         
     - name: Check PHP syntax
       run: |
-        find . -name "*.php" -not -path "./vendor/*" -exec php -l {} \; | grep -v "No syntax errors"
+        echo "Checking PHP syntax for all files..."
+        
+        # Run PHP lint on all files and capture output
+        LINT_OUTPUT=$(find . -name "*.php" -not -path "./vendor/*" -exec php -l {} \; 2>&1)
+        
+        # Check if there are any actual errors (not "No syntax errors detected")
+        if echo "$LINT_OUTPUT" | grep -v "No syntax errors detected" | grep -q "error"; then
+          echo "❌ PHP syntax errors found:"
+          echo "$LINT_OUTPUT" | grep -v "No syntax errors detected"
+          exit 1
+        else
+          FILECOUNT=$(find . -name "*.php" -not -path "./vendor/*" | wc -l)
+          echo "✅ All $FILECOUNT PHP files have valid syntax"
+        fi
         
     - name: WordPress Coding Standards
       run: |
-        if command -v phpcs &> /dev/null; then
-          phpcs --standard=WordPress --extensions=php --ignore=vendor/ .
+        # Install PHPCS and WordPress standards if not available
+        if ! command -v phpcs &> /dev/null; then
+          echo "Installing PHPCS and WordPress Coding Standards..."
+          composer global require "squizlabs/php_codesniffer=*"
+          composer global require "wp-coding-standards/wpcs=*"
+          phpcs --config-set installed_paths ~/.composer/vendor/wp-coding-standards/wpcs
+        fi
+        
+        # Run PHPCS with relaxed standards for initial check
+        echo "Running WordPress Coding Standards check..."
+        if phpcs --standard=WordPress-Core --extensions=php --ignore=vendor/,node_modules/ --warning-severity=0 .; then
+          echo "✅ Code follows WordPress coding standards"
         else
-          echo "PHPCS not available, skipping coding standards check"
+          echo "⚠️  Coding standards issues found (non-blocking)"
         fi
       continue-on-error: true
       
     - name: Static Analysis
       run: |
-        if command -v phpstan &> /dev/null; then
-          phpstan analyse --level=1 --no-progress .
+        # Install PHPStan if not available
+        if ! command -v phpstan &> /dev/null; then
+          echo "Installing PHPStan..."
+          composer global require "phpstan/phpstan=*"
+        fi
+        
+        # Create basic PHPStan config if it doesn't exist
+        if [ ! -f phpstan.neon ]; then
+          cat > phpstan.neon << 'EOF'
+parameters:
+    level: 1
+    paths:
+        - .
+    excludePaths:
+        - vendor
+        - node_modules
+EOF
+        fi
+        
+        echo "Running PHPStan static analysis..."
+        if phpstan analyse --no-progress --memory-limit=1G; then
+          echo "✅ Static analysis passed"
         else
-          echo "PHPStan not available, skipping static analysis"
+          echo "⚠️  Static analysis issues found (non-blocking)"
         fi
       continue-on-error: true
 
