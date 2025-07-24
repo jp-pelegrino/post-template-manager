@@ -1,24 +1,25 @@
 (function (wp, $) {
     if (!wp || !wp.data || !wp.apiFetch) return;
 
-    // Fetch templates from REST API
+    // Use the nonce for all apiFetch requests
+    if (window.ptmAdmin && window.ptmAdmin.nonce) {
+        wp.apiFetch.use(wp.apiFetch.createNonceMiddleware(window.ptmAdmin.nonce));
+    }
+
     async function fetchTemplates() {
         return await wp.apiFetch({ path: '/wp/v2/post_template?per_page=100' });
     }
 
-    // Fetch template details
     async function fetchTemplateContent(id) {
         return await wp.apiFetch({ path: `/ptm/v1/template/${id}` });
     }
 
-    // Insert blocks into the editor
     function insertContent(content) {
         wp.data.dispatch('core/editor').replaceBlocks(
             wp.blocks.parse(content)
         );
     }
 
-    // Add a custom panel in the post editor sidebar
     wp.plugins.registerPlugin('ptm-template-sidebar', {
         render: function () {
             const [templates, setTemplates] = wp.element.useState([]);
@@ -44,7 +45,6 @@
                 fetchTemplateContent(id)
                     .then((tpl) => {
                         insertContent(tpl.content);
-                        // setFeaturedImage(tpl.featured_image); // Implement if desired
                     })
                     .catch(() => alert('Could not load template content'));
             }
