@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2-beta](https://github.com/jp-pelegrino/post-template-manager/compare/v1.0.1-beta...v1.0.2-beta) (2025-07-24)
+
+
+### Bug Fixes
+
+* issues with the code ([20d544d](https://github.com/jp-pelegrino/post-template-manager/commit/20d544d860a3453140bcd3cf9b58a3c24220701b))
+* issues with the code actions ([86c9fdf](https://github.com/jp-pelegrino/post-template-manager/commit/86c9fdf5d0c14481246eb6700625dc3228c22e3d))
+
 ## [1.0.1-beta] - 2025-07-24
 ### Fixed
 - REST API permission error when loading template content from the sidebar.
