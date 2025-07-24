@@ -91,5 +91,3 @@ add_action( 'rest_api_init', function () {
         }
     ));
 });
-
-// Testing automated release with 'fix'
