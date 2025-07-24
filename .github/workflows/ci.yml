@@ -30,6 +30,11 @@ jobs:
         extensions: mbstring, intl, gd, xml, zip
         tools: composer, phpcs, phpstan
         
+    - name: Add Composer global bin to PATH
+      run: |
+        echo "$HOME/.composer/vendor/bin" >> $GITHUB_PATH
+        echo "$HOME/.config/composer/vendor/bin" >> $GITHUB_PATH
+        
     - name: Validate composer.json
       run: |
         if [ -f composer.json ]; then
@@ -42,10 +47,19 @@ jobs:
           composer install --prefer-dist --no-progress
         fi
         
-        # Install WordPress coding standards
-        composer global require squizlabs/php_codesniffer
-        composer global require wp-coding-standards/wpcs
-        phpcs --config-set installed_paths ~/.composer/vendor/wp-coding-standards/wpcs
+        # Configure Composer to allow plugins and install WordPress coding standards
+        composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+        composer global require squizlabs/php_codesniffer "^3.7"
+        composer global require wp-coding-standards/wpcs "^3.0"
+        
+        # Verify phpcs is available and configure paths
+        if command -v phpcs &> /dev/null; then
+          phpcs --config-set installed_paths ~/.composer/vendor/wp-coding-standards/wpcs
+          echo "✅ WordPress coding standards installed successfully"
+          phpcs -i
+        else
+          echo "⚠️ PHPCS installation failed"
+        fi
         
     - name: Check PHP syntax
       run: |
@@ -62,18 +76,34 @@ jobs:
         
     - name: WordPress Coding Standards
       run: |
-        if command -v phpcs &> /dev/null; then
-          # Check if WordPress standards are available
-          if phpcs -i | grep -q "WordPress"; then
-            echo "Running WordPress coding standards check..."
-            phpcs --standard=WordPress --extensions=php --ignore=vendor/ . || echo "⚠️ Coding standards issues found (non-blocking)"
-          else
-            echo "WordPress coding standards not available, running basic PSR12 check..."
-            phpcs --standard=PSR12 --extensions=php --ignore=vendor/ . || echo "⚠️ PSR12 coding standards issues found (non-blocking)"
-          fi
-        else
-          echo "PHPCS not available, skipping coding standards check"
+        echo "🔍 Running coding standards check..."
+        
+        # Check if phpcs is available
+        if ! command -v phpcs &> /dev/null; then
+          echo "⚠️ PHPCS not found, skipping coding standards check"
+          exit 0
         fi
+        
+        # Show available standards
+        echo "Available coding standards:"
+        phpcs -i
+        
+        # Check if WordPress standards are available
+        if phpcs -i | grep -q "WordPress"; then
+          echo "✅ Running WordPress coding standards check..."
+          phpcs --standard=WordPress --extensions=php --ignore=vendor/,build/ --colors . || {
+            echo "⚠️ WordPress coding standards issues found (non-blocking)"
+            exit 0
+          }
+        else
+          echo "⚠️ WordPress standards not available, running PSR12 check..."
+          phpcs --standard=PSR12 --extensions=php --ignore=vendor/,build/ --colors . || {
+            echo "⚠️ PSR12 coding standards issues found (non-blocking)"
+            exit 0
+          }
+        fi
+        
+        echo "✅ Coding standards check completed"
       continue-on-error: true
       
     - name: Static Analysis
