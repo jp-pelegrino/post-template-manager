@@ -1,0 +1,440 @@
+name: Release and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.0)'
+        required: false
+        type: string
+      release_type:
+        description: 'Type of release'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+env:
+  PLUGIN_SLUG: post-template-manager
+  PLUGIN_NAME: Post Template Manager
+
+jobs:
+  test:
+    name: Test Plugin
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        php-version: ['8.2', '8.3']
+        wordpress-version: ['6.8', 'latest']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PHP ${{ matrix.php-version }}
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php-version }}
+        extensions: mbstring, intl, gd, xml, zip
+        tools: composer, phpunit
+        
+    - name: Validate plugin structure
+      run: |
+        # Check if main plugin file exists
+        if [ ! -f "${{ env.PLUGIN_SLUG }}.php" ]; then
+          echo "Error: Main plugin file not found"
+          exit 1
+        fi
+        
+        # Check for required directories
+        for dir in includes assets; do
+          if [ ! -d "$dir" ]; then
+            echo "Warning: $dir directory not found"
+          fi
+        done
+        
+        # Validate PHP syntax
+        find . -name "*.php" -exec php -l {} \;
+
+  version-and-release:
+    name: Version and Release
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      changelog: ${{ steps.version.outputs.changelog }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        
+    - name: Install dependencies
+      run: |
+        npm install -g standard-version
+        
+    - name: Configure git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+    - name: Determine version
+      id: version
+      run: |
+        if [ "${{ github.event.inputs.version }}" != "" ]; then
+          # Manual version input
+          NEW_VERSION="${{ github.event.inputs.version }}"
+          echo "Using manual version: $NEW_VERSION"
+        else
+          # Get current version from plugin file
+          CURRENT_VERSION=$(grep -oP "Version:\s*\K[\d\.]+" ${{ env.PLUGIN_SLUG }}.php || echo "1.0.0")
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Determine next version based on commit messages
+          if git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD | grep -E "(BREAKING CHANGE|major:)" > /dev/null; then
+            RELEASE_TYPE="major"
+          elif git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD | grep -E "(feat:|feature:|minor:)" > /dev/null; then
+            RELEASE_TYPE="minor"
+          else
+            RELEASE_TYPE="patch"
+          fi
+          
+          # Calculate new version
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR=${VERSION_PARTS[0]:-1}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          case $RELEASE_TYPE in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              ;;
+          esac
+        fi
+        
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "New version will be: $NEW_VERSION"
+        
+    - name: Update plugin version
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Update main plugin file
+        sed -i "s/Version: .*/Version: $VERSION/" ${{ env.PLUGIN_SLUG }}.php
+        sed -i "s/define('PTM_VERSION', '[^']*');/define('PTM_VERSION', '$VERSION');/" ${{ env.PLUGIN_SLUG }}.php
+        
+        # Update package.json if it exists
+        if [ -f package.json ]; then
+          npm version $VERSION --no-git-tag-version
+        fi
+        
+        echo "Updated plugin version to $VERSION"
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        DATE=$(date +%Y-%m-%d)
+        
+        # Generate changelog entry
+        CHANGELOG_ENTRY="## [$VERSION] - $DATE\n\n"
+        
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -n "$LAST_TAG" ]; then
+          COMMITS=$(git log --oneline $LAST_TAG..HEAD --pretty=format:"- %s")
+        else
+          COMMITS=$(git log --oneline --pretty=format:"- %s")
+        fi
+        
+        if [ -n "$COMMITS" ]; then
+          CHANGELOG_ENTRY="${CHANGELOG_ENTRY}### Changes\n$COMMITS\n\n"
+        fi
+        
+        # Update CHANGELOG.md
+        if [ -f CHANGELOG.md ]; then
+          # Insert new entry after the header
+          sed -i "/^## \[Unreleased\]/a\\
+\\
+$CHANGELOG_ENTRY" CHANGELOG.md
+        fi
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo -e "$CHANGELOG_ENTRY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Commit version changes
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        git add .
+        git commit -m "chore: bump version to $VERSION" || exit 0
+        git tag -a "v$VERSION" -m "Release version $VERSION"
+        git push origin main
+        git push origin "v$VERSION"
+
+  build-and-package:
+    name: Build and Package Plugin
+    needs: version-and-release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        tools: composer
+        
+    - name: Install dependencies
+      run: |
+        if [ -f composer.json ]; then
+          composer install --no-dev --optimize-autoloader
+        fi
+        
+    - name: Prepare plugin directory
+      run: |
+        VERSION="${{ needs.version-and-release.outputs.version }}"
+        
+        # Create build directory
+        mkdir -p build/${{ env.PLUGIN_SLUG }}
+        
+        # Copy plugin files (exclude development files)
+        rsync -av \
+          --exclude='.git*' \
+          --exclude='node_modules' \
+          --exclude='tests' \
+          --exclude='build' \
+          --exclude='.github' \
+          --exclude='composer.json' \
+          --exclude='composer.lock' \
+          --exclude='package*.json' \
+          --exclude='phpunit.xml' \
+          --exclude='webpack.config.js' \
+          --exclude='src' \
+          --exclude='*.md' \
+          ./ build/${{ env.PLUGIN_SLUG }}/
+          
+        # Copy essential docs
+        cp README.md build/${{ env.PLUGIN_SLUG }}/readme.txt 2>/dev/null || cp README.md build/${{ env.PLUGIN_SLUG }}/
+        cp CHANGELOG.md build/${{ env.PLUGIN_SLUG }}/ 2>/dev/null || true
+        cp LICENSE build/${{ env.PLUGIN_SLUG }}/ 2>/dev/null || true
+        
+        # Ensure correct permissions
+        find build/${{ env.PLUGIN_SLUG }} -type f -exec chmod 644 {} \;
+        find build/${{ env.PLUGIN_SLUG }} -type d -exec chmod 755 {} \;
+        
+    - name: Create WordPress-compatible readme.txt
+      run: |
+        VERSION="${{ needs.version-and-release.outputs.version }}"
+        
+        cat > build/${{ env.PLUGIN_SLUG }}/readme.txt << 'EOF'
+=== ${{ env.PLUGIN_NAME }} ===
+Contributors: jp-pelegrino
+Tags: templates, posts, gutenberg, content, management
+Requires at least: 6.8
+Tested up to: 6.8
+Stable tag: ${{ needs.version-and-release.outputs.version }}
+Requires PHP: 8.2
+License: Unlicense
+License URI: https://unlicense.org/
+
+A comprehensive WordPress plugin that allows administrators to create post templates with preset layouts, blocks, content, and featured images.
+
+== Description ==
+
+Post Template Manager allows administrators to create reusable post templates with preset layouts, blocks, content, and featured images. This makes it easy for writers and editors to create consistent, professional posts using predefined templates.
+
+= Features =
+
+* Custom post type for template management
+* Full Gutenberg block editor support
+* Template categories with icons and colors
+* Template selector interface in post editor
+* Usage statistics and tracking
+* Multi-post-type support
+* Featured image template support
+* Admin-only template creation
+* Responsive design
+* HTTPS and Cloudflare compatible
+
+= Perfect for =
+
+* Government websites needing consistent job postings
+* Organizations with regular procurement announcements
+* News sites with standardized article formats
+* Event management with consistent event layouts
+* Any site requiring standardized content templates
+
+== Installation ==
+
+1. Upload the plugin files to the `/wp-content/plugins/post-template-manager` directory, or install the plugin through the WordPress plugins screen directly.
+2. Activate the plugin through the 'Plugins' screen in WordPress.
+3. Go to 'Post Templates' in your WordPress admin to start creating templates.
+
+== Frequently Asked Questions ==
+
+= Can I customize template layouts after applying them? =
+
+Yes! Once a template is applied, you can edit the content just like any regular post. The template provides a starting point.
+
+= Will templates work with custom post types? =
+
+Absolutely! You can configure templates to work with any public post type, including custom post types.
+
+= Can I restrict template access to specific user roles? =
+
+Currently, template creation is limited to administrators. Template usage follows standard post editing permissions.
+
+== Screenshots ==
+
+1. Template management interface
+2. Template selector in post editor
+3. Template categories and organization
+4. Usage statistics dashboard
+
+== Changelog ==
+
+${{ needs.version-and-release.outputs.changelog }}
+
+== Upgrade Notice ==
+
+= ${{ needs.version-and-release.outputs.version }} =
+${{ needs.version-and-release.outputs.changelog }}
+EOF
+        
+    - name: Create ZIP package
+      run: |
+        VERSION="${{ needs.version-and-release.outputs.version }}"
+        
+        cd build
+        zip -r "../${{ env.PLUGIN_SLUG }}-$VERSION.zip" ${{ env.PLUGIN_SLUG }}
+        cd ..
+        
+        # Create latest version without version number for easy downloading
+        cp "${{ env.PLUGIN_SLUG }}-$VERSION.zip" "${{ env.PLUGIN_SLUG }}-latest.zip"
+        
+        echo "Created packages:"
+        ls -la *.zip
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: plugin-packages
+        path: |
+          ${{ env.PLUGIN_SLUG }}-*.zip
+        retention-days: 90
+
+  create-release:
+    name: Create GitHub Release
+    needs: [version-and-release, build-and-package]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: plugin-packages
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ needs.version-and-release.outputs.version }}
+        name: Release v${{ needs.version-and-release.outputs.version }}
+        body: |
+          ## ${{ env.PLUGIN_NAME }} v${{ needs.version-and-release.outputs.version }}
+          
+          ${{ needs.version-and-release.outputs.changelog }}
+          
+          ### Installation
+          
+          1. Download the `${{ env.PLUGIN_SLUG }}-${{ needs.version-and-release.outputs.version }}.zip` file
+          2. Go to your WordPress admin → Plugins → Add New → Upload Plugin
+          3. Select the downloaded ZIP file and install
+          4. Activate the plugin
+          
+          ### Requirements
+          
+          - WordPress 6.8+
+          - PHP 8.2+
+          
+          ---
+          
+          **Full Documentation:** [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+        draft: false
+        prerelease: false
+        files: |
+          ${{ env.PLUGIN_SLUG }}-${{ needs.version-and-release.outputs.version }}.zip
+          ${{ env.PLUGIN_SLUG }}-latest.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-to-wordpress-org:
+    name: Deploy to WordPress.org (Optional)
+    needs: [version-and-release, build-and-package]
+    runs-on: ubuntu-latest
+    if: false  # Set to true when ready to deploy to WordPress.org
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: plugin-packages
+        
+    - name: WordPress Plugin Deploy
+      uses: 10up/action-wordpress-plugin-deploy@stable
+      env:
+        SVN_PASSWORD: ${{ secrets.WP_ORG_PASSWORD }}
+        SVN_USERNAME: ${{ secrets.WP_ORG_USERNAME }}
+        SLUG: ${{ env.PLUGIN_SLUG }}
+
+  notify:
+    name: Notify Release
+    needs: [version-and-release, create-release]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: needs.create-release.result == 'success'
+      run: |
+        echo "✅ Successfully released ${{ env.PLUGIN_NAME }} v${{ needs.version-and-release.outputs.version }}"
+        echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.version-and-release.outputs.version }}"
+        
+    - name: Notify failure
+      if: needs.create-release.result == 'failure'
+      run: |
+        echo "❌ Release failed for ${{ env.PLUGIN_NAME }}"
+        exit 1

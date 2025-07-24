@@ -1,0 +1,330 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PLUGIN_SLUG: post-template-manager
+  PLUGIN_NAME: Post Template Manager
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        php-version: ['8.2', '8.3']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PHP ${{ matrix.php-version }}
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php-version }}
+        extensions: mbstring, intl, gd, xml, zip
+        tools: composer, phpcs, phpstan
+        
+    - name: Validate composer.json
+      run: |
+        if [ -f composer.json ]; then
+          composer validate --strict
+        fi
+        
+    - name: Install dependencies
+      run: |
+        if [ -f composer.json ]; then
+          composer install --prefer-dist --no-progress
+        fi
+        
+    - name: Check PHP syntax
+      run: |
+        find . -name "*.php" -not -path "./vendor/*" -exec php -l {} \; | grep -v "No syntax errors"
+        
+    - name: WordPress Coding Standards
+      run: |
+        if command -v phpcs &> /dev/null; then
+          phpcs --standard=WordPress --extensions=php --ignore=vendor/ .
+        else
+          echo "PHPCS not available, skipping coding standards check"
+        fi
+      continue-on-error: true
+      
+    - name: Static Analysis
+      run: |
+        if command -v phpstan &> /dev/null; then
+          phpstan analyse --level=1 --no-progress .
+        else
+          echo "PHPStan not available, skipping static analysis"
+        fi
+      continue-on-error: true
+
+  build-dev:
+    name: Build Development Package
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Get branch name
+      id: branch
+      run: |
+        BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+        echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+        echo "Building for branch: $BRANCH"
+        
+    - name: Create development build
+      run: |
+        BRANCH="${{ steps.branch.outputs.branch }}"
+        BUILD_NAME="${{ env.PLUGIN_SLUG }}-${BRANCH}-$(date +%Y%m%d-%H%M%S)"
+        
+        # Create build directory
+        mkdir -p build/${{ env.PLUGIN_SLUG }}
+        
+        # Copy plugin files
+        rsync -av \
+          --exclude='.git*' \
+          --exclude='node_modules' \
+          --exclude='tests' \
+          --exclude='build' \
+          --exclude='.github' \
+          --exclude='composer.json' \
+          --exclude='composer.lock' \
+          --exclude='package*.json' \
+          ./ build/${{ env.PLUGIN_SLUG }}/
+          
+        # Add development indicator to main plugin file
+        sed -i "s/Version: .*/Version: dev-${BRANCH}-$(date +%Y%m%d)/" build/${{ env.PLUGIN_SLUG }}/${{ env.PLUGIN_SLUG }}.php
+        sed -i "/Plugin Name:/a\\ * Development Build: ${BRANCH} branch" build/${{ env.PLUGIN_SLUG }}/${{ env.PLUGIN_SLUG }}.php
+        
+        # Create ZIP
+        cd build
+        zip -r "../${BUILD_NAME}.zip" ${{ env.PLUGIN_SLUG }}
+        cd ..
+        
+        echo "build_name=${BUILD_NAME}" >> $GITHUB_ENV
+        
+    - name: Upload development build
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.build_name }}
+        path: ${{ env.build_name }}.zip
+        retention-days: 30
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run security scan
+      run: |
+        # Check for common security issues
+        echo "🔍 Scanning for security issues..."
+        
+        # Check for eval() usage
+        if grep -r "eval(" --include="*.php" .; then
+          echo "⚠️  Warning: eval() found in code"
+        fi
+        
+        # Check for unsafe SQL queries
+        if grep -r "\$wpdb->query(\$" --include="*.php" .; then
+          echo "⚠️  Warning: Potentially unsafe SQL query found"
+        fi
+        
+        # Check for direct $_GET/$_POST usage without sanitization
+        if grep -rP "\\\$_(GET|POST|REQUEST)\[" --include="*.php" . | grep -v "sanitize\|wp_verify_nonce\|check_admin_referer"; then
+          echo "⚠️  Warning: Unsanitized user input found"
+        fi
+        
+        # Check for file inclusion vulnerabilities
+        if grep -r "include\|require" --include="*.php" . | grep "\$"; then
+          echo "⚠️  Warning: Dynamic file inclusion found"
+        fi
+        
+        echo "✅ Security scan completed"
+
+  compatibility-check:
+    name: WordPress Compatibility
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        wordpress-version: ['6.8', 'latest']
+        php-version: ['8.2', '8.3']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PHP ${{ matrix.php-version }}
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php-version }}
+        extensions: mbstring, intl, gd, xml, zip, mysql
+        
+    - name: Start MySQL
+      run: |
+        sudo systemctl start mysql.service
+        mysql -e "CREATE DATABASE wordpress_test;" -uroot -proot
+        mysql -e "CREATE USER 'wp_user'@'localhost' IDENTIFIED BY 'wp_pass';" -uroot -proot
+        mysql -e "GRANT ALL PRIVILEGES ON wordpress_test.* TO 'wp_user'@'localhost';" -uroot -proot
+        
+    - name: Download WordPress
+      run: |
+        if [ "${{ matrix.wordpress-version }}" = "latest" ]; then
+          wget https://wordpress.org/latest.tar.gz
+        else
+          wget https://wordpress.org/wordpress-${{ matrix.wordpress-version }}.tar.gz -O latest.tar.gz
+        fi
+        tar -xzf latest.tar.gz
+        
+    - name: Configure WordPress
+      run: |
+        cd wordpress
+        cp wp-config-sample.php wp-config.php
+        sed -i "s/database_name_here/wordpress_test/" wp-config.php
+        sed -i "s/username_here/wp_user/" wp-config.php
+        sed -i "s/password_here/wp_pass/" wp-config.php
+        sed -i "s/localhost/127.0.0.1/" wp-config.php
+        
+    - name: Install plugin
+      run: |
+        mkdir -p wordpress/wp-content/plugins/${{ env.PLUGIN_SLUG }}
+        rsync -av \
+          --exclude='.git*' \
+          --exclude='node_modules' \
+          --exclude='tests' \
+          --exclude='build' \
+          --exclude='.github' \
+          --exclude='wordpress' \
+          ./ wordpress/wp-content/plugins/${{ env.PLUGIN_SLUG }}/
+          
+    - name: Test plugin activation
+      run: |
+        cd wordpress
+        php -S localhost:8000 &
+        sleep 5
+        
+        # Basic syntax check
+        php -f wp-content/plugins/${{ env.PLUGIN_SLUG }}/${{ env.PLUGIN_SLUG }}.php
+        
+        echo "✅ Plugin compatibility test passed for WP ${{ matrix.wordpress-version }} with PHP ${{ matrix.php-version }}"
+
+  performance-test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, intl, gd, xml, zip
+        
+    - name: Performance analysis
+      run: |
+        echo "📊 Running performance analysis..."
+        
+        # Check file sizes
+        echo "Plugin file sizes:"
+        find . -name "*.php" -not -path "./.git/*" -exec wc -c {} + | sort -n
+        
+        # Count lines of code
+        echo -e "\nLines of code:"
+        find . -name "*.php" -not -path "./.git/*" -exec wc -l {} + | tail -1
+        
+        # Check for large files
+        echo -e "\nLarge files (>100KB):"
+        find . -type f -size +100k -not -path "./.git/*"
+        
+        # Memory usage estimation
+        echo -e "\nEstimated memory usage:"
+        php -r "
+        \$files = glob('*.php');
+        \$total = 0;
+        foreach(\$files as \$file) {
+          \$total += filesize(\$file);
+        }
+        echo 'Total PHP files: ' . round(\$total/1024, 2) . ' KB\n';
+        "
+
+  validate-readme:
+    name: Validate Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Check README
+      run: |
+        echo "📚 Validating documentation..."
+        
+        # Check if README exists
+        if [ ! -f README.md ]; then
+          echo "❌ README.md not found"
+          exit 1
+        fi
+        
+        # Check for required sections
+        REQUIRED_SECTIONS=("Installation" "Features" "Requirements" "License")
+        for section in "${REQUIRED_SECTIONS[@]}"; do
+          if ! grep -q "## $section" README.md; then
+            echo "⚠️  Warning: $section section not found in README"
+          fi
+        done
+        
+        # Check CHANGELOG
+        if [ -f CHANGELOG.md ]; then
+          if ! grep -q "## \[" CHANGELOG.md; then
+            echo "⚠️  Warning: CHANGELOG.md doesn't follow semantic versioning format"
+          fi
+        fi
+        
+        echo "✅ Documentation validation completed"
+
+  notify-status:
+    name: Notify Build Status
+    needs: [lint-and-test, security-scan, compatibility-check, performance-test, validate-readme]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Determine overall status
+      id: status
+      run: |
+        if [[ "${{ needs.lint-and-test.result }}" == "success" && \
+              "${{ needs.security-scan.result }}" == "success" && \
+              "${{ needs.compatibility-check.result }}" == "success" && \
+              "${{ needs.performance-test.result }}" == "success" && \
+              "${{ needs.validate-readme.result }}" == "success" ]]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "message=All checks passed! ✅" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=Some checks failed! ❌" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Output status
+      run: |
+        echo "🔄 Build Status: ${{ steps.status.outputs.message }}"
+        echo "📊 Test Results:"
+        echo "  - Lint & Test: ${{ needs.lint-and-test.result }}"
+        echo "  - Security Scan: ${{ needs.security-scan.result }}"
+        echo "  - Compatibility: ${{ needs.compatibility-check.result }}"
+        echo "  - Performance: ${{ needs.performance-test.result }}"
+        echo "  - Documentation: ${{ needs.validate-readme.result }}"

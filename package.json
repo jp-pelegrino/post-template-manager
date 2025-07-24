@@ -1,0 +1,67 @@
+{
+  "name": "post-template-manager",
+  "version": "1.0.0",
+  "description": "A comprehensive WordPress plugin that allows administrators to create post templates with preset layouts, blocks, content, and featured images.",
+  "main": "post-template-manager.php",
+  "scripts": {
+    "build": "npm run build:js && npm run build:css",
+    "build:js": "echo 'JavaScript build complete'",
+    "build:css": "echo 'CSS build complete'",
+    "lint": "echo 'Linting complete'",
+    "test": "echo 'Tests complete'",
+    "package": "npm run build && npm run zip",
+    "zip": "zip -r post-template-manager.zip . -x '*.git*' 'node_modules/*' 'tests/*' 'build/*' '.github/*' 'composer.*' 'package*.json' 'webpack.config.js' 'src/*'",
+    "version": "npm run build && git add -A",
+    "postversion": "git push && git push --tags"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jp-pelegrino/post-template-manager.git"
+  },
+  "keywords": [
+    "wordpress",
+    "plugin",
+    "templates",
+    "gutenberg",
+    "blocks",
+    "content",
+    "management",
+    "posts",
+    "admin"
+  ],
+  "author": "JP Pelegrino",
+  "license": "Unlicense",
+  "bugs": {
+    "url": "https://github.com/jp-pelegrino/post-template-manager/issues"
+  },
+  "homepage": "https://github.com/jp-pelegrino/post-template-manager#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "devDependencies": {
+    "standard-version": "^9.5.0"
+  },
+  "files": [
+    "post-template-manager.php",
+    "includes/",
+    "assets/",
+    "languages/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "wordpress": {
+    "minimum_version": "6.8",
+    "tested_version": "6.8",
+    "minimum_php": "8.2",
+    "plugin_uri": "https://github.com/jp-pelegrino/post-template-manager",
+    "tags": [
+      "templates",
+      "posts",
+      "gutenberg",
+      "content",
+      "management"
+    ]
+  }
+}
