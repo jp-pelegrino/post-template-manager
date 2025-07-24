@@ -85,9 +85,9 @@ add_action( 'rest_api_init', function () {
             }
             return new WP_Error( 'not_found', 'Template not found', array( 'status' => 404 ) );
         },
-        // Only allow users with edit_posts capability (admins/editors)
+        // Allow users with edit_posts OR read capability (admins, editors, writers)
         'permission_callback' => function () {
-            return current_user_can( 'edit_posts' );
+            return current_user_can( 'edit_posts' ) || current_user_can( 'read' );
         }
     ));
 });
