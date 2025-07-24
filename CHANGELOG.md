@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3-beta](https://github.com/jp-pelegrino/post-template-manager/compare/v1.0.2-beta...v1.0.3-beta) (2025-07-24)
+
+
+### Bug Fixes
+
+* resolving issues with REST API ([c72c8e9](https://github.com/jp-pelegrino/post-template-manager/commit/c72c8e992dee41ba7e9047edbe44de3e48006439))
+
+
+### Miscellaneous Chores
+
+* **release:** 1.0.3-beta - config and workflow fixes ([bf50010](https://github.com/jp-pelegrino/post-template-manager/commit/bf50010805a52013a11619610e99669c0e0960f1))
+* **release:** 1.0.3.1-beta - config and workflow fixes ([b41f9a6](https://github.com/jp-pelegrino/post-template-manager/commit/b41f9a6643cb6d2b699eb662c40c418f8ab0452d))
+
 ## [1.0.3-beta] - 2025-07-25
 ### Changed
 - Manual config and changelog edits for improved Release Please compatibility and workflow reliability.
