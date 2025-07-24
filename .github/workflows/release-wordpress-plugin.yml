@@ -40,6 +40,11 @@ jobs:
         run: |
           zip -r post-template-manager-${RELEASE_VERSION}.zip post-template-manager
 
+      - name: Validate ZIP contents
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          unzip -l post-template-manager-${RELEASE_VERSION}.zip
+
       - name: Upload plugin zip to release
         if: ${{ steps.release.outputs.release_created }}
         uses: softprops/action-gh-release@v2
