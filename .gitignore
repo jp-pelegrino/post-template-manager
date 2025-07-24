@@ -1,0 +1,37 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Build artifacts
+dist/
+build/
+
+# Cache and temporary files
+.cache/
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+coverage/
+*.log
+
+# WordPress specific
+wp-config.php
+.htaccess
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
