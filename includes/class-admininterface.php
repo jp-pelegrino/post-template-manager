@@ -24,20 +24,37 @@ class AdminInterface
     
     public function add_admin_menu()
     {
-        // Add main menu page
+        // Add main menu page that redirects to the post type listing
         add_menu_page(
             __('Post Templates', 'post-template-manager'),
             __('Post Templates', 'post-template-manager'),
             'manage_options',
-            'edit.php?post_type=ptm_template',
-            '',
+            'ptm-templates',
+            [$this, 'templates_page'],
             'dashicons-media-document',
             25
         );
         
         // Add submenu pages
         add_submenu_page(
-            'edit.php?post_type=ptm_template',
+            'ptm-templates',
+            __('All Templates', 'post-template-manager'),
+            __('All Templates', 'post-template-manager'),
+            'manage_options',
+            'ptm-templates',
+            [$this, 'templates_page']
+        );
+        
+        add_submenu_page(
+            'ptm-templates',
+            __('Add New Template', 'post-template-manager'),
+            __('Add New', 'post-template-manager'),
+            'manage_options',
+            'post-new.php?post_type=ptm_template'
+        );
+        
+        add_submenu_page(
+            'ptm-templates',
             __('Template Settings', 'post-template-manager'),
             __('Settings', 'post-template-manager'),
             'manage_options',
@@ -46,13 +63,20 @@ class AdminInterface
         );
         
         add_submenu_page(
-            'edit.php?post_type=ptm_template',
+            'ptm-templates',
             __('Template Usage Statistics', 'post-template-manager'),
             __('Usage Stats', 'post-template-manager'),
             'manage_options',
             'ptm-stats',
             [$this, 'stats_page']
         );
+    }
+    
+    public function templates_page()
+    {
+        // Redirect to the actual post type listing page
+        wp_redirect(admin_url('edit.php?post_type=ptm_template'));
+        exit;
     }
     
     public function admin_init()
