@@ -7,6 +7,10 @@ All notable changes to this project will be documented in this file.
 - REST API permission error when loading template content from the sidebar.
 - Improved plugin ZIP packaging for direct WordPress installation.
 
+### Changed
+- Script enqueue version now automatically syncs with plugin header version for full release automation.
+- GitHub Actions workflow fixed to properly upload CHANGELOG.md without using unsupported exists() function.
+
 ### Added
 - Automated GitHub Actions workflow for packaging and releasing the plugin.
 - Automatic changelog and release notes generation via release-please.
