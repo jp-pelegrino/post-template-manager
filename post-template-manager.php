@@ -45,10 +45,21 @@ spl_autoload_register(function ($class) {
     if (strpos($class, 'PostTemplateManager\\') === 0) {
         $class = str_replace('PostTemplateManager\\', '', $class);
         $class = str_replace('\\', DIRECTORY_SEPARATOR, $class);
-        $file = PTM_PLUGIN_DIR . 'includes/class-' . strtolower(str_replace('_', '-', $class)) . '.php';
         
-        if (file_exists($file)) {
-            require_once $file;
+        // Map namespace paths to actual file names
+        $class_map = [
+            'Core/PostType' => 'class-posttype.php',
+            'Core/Taxonomy' => 'class-taxonomy.php', 
+            'Admin/AdminInterface' => 'class-admininterface.php',
+            'Frontend/TemplateSelector' => 'class-templateselector.php',
+            'Core/Ajax' => 'class-ajax.php'
+        ];
+        
+        if (isset($class_map[$class])) {
+            $file = PTM_PLUGIN_DIR . 'includes/' . $class_map[$class];
+            if (file_exists($file)) {
+                require_once $file;
+            }
         }
     }
 });
@@ -90,12 +101,24 @@ class PostTemplateManager
     
     public function init()
     {
-        // Initialize core classes
-        new PostTemplateManager\Core\PostType();
-        new PostTemplateManager\Core\Taxonomy();
-        new PostTemplateManager\Admin\AdminInterface();
-        new PostTemplateManager\Frontend\TemplateSelector();
-        new PostTemplateManager\Core\Ajax();
+        try {
+            // Initialize core classes
+            new PostTemplateManager\Core\PostType();
+            new PostTemplateManager\Core\Taxonomy();
+            new PostTemplateManager\Admin\AdminInterface();
+            new PostTemplateManager\Frontend\TemplateSelector();
+            new PostTemplateManager\Core\Ajax();
+        } catch (Exception $e) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('Post Template Manager initialization error: ' . $e->getMessage());
+            }
+            add_action('admin_notices', function() use ($e) {
+                echo '<div class="notice notice-error"><p>';
+                echo esc_html__('Post Template Manager failed to initialize: ', 'post-template-manager');
+                echo esc_html($e->getMessage());
+                echo '</p></div>';
+            });
+        }
     }
     
     public function admin_scripts($hook)
