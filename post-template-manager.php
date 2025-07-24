@@ -48,11 +48,14 @@ add_action( 'init', 'ptm_register_post_template_cpt' );
 function ptm_enqueue_admin_scripts( $hook ) {
     if ( 'post-new.php' !== $hook && 'edit.php' !== $hook ) return;
 
+    // Get plugin version from header
+    $plugin_data = get_file_data( __FILE__, array( 'Version' => 'Version' ) );
+    $version = isset( $plugin_data['Version'] ) ? $plugin_data['Version'] : '1.0.0';
     wp_enqueue_script(
         'ptm-admin-js',
         plugins_url( 'js/ptm-admin.js', __FILE__ ),
         array( 'wp-api', 'wp-edit-post' ),
-        '1.0.1-beta',
+        $version,
         true
     );
     // Localize the REST API nonce for authentication
