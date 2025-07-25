@@ -15,7 +15,7 @@ class AdminInterface
 {
     public function __construct()
     {
-        add_action('admin_menu', [$this, 'add_admin_menu']);
+        add_action('admin_menu', [$this, 'add_admin_menu'], 20); // Run after post type registration
         add_action('admin_init', [$this, 'admin_init']);
         add_action('admin_notices', [$this, 'admin_notices']);
         add_filter('post_row_actions', [$this, 'add_duplicate_link'], 10, 2);
@@ -24,20 +24,45 @@ class AdminInterface
     
     public function add_admin_menu()
     {
-        // Add main menu page
+        // Check if post type exists before adding menu
+        if (!post_type_exists('ptm_template')) {
+            return;
+        }
+        
+        // Add main menu page that redirects to post type list
         add_menu_page(
             __('Post Templates', 'post-template-manager'),
             __('Post Templates', 'post-template-manager'),
             'manage_options',
-            'edit.php?post_type=ptm_template',
-            '',
+            'ptm-templates',
+            [$this, 'templates_page'],
             'dashicons-media-document',
             25
         );
         
+        // Add submenu for post type list
+        add_submenu_page(
+            'ptm-templates',
+            __('All Templates', 'post-template-manager'),
+            __('All Templates', 'post-template-manager'),
+            'manage_options',
+            'ptm-templates',
+            [$this, 'templates_page']
+        );
+        
+        // Add submenu for adding new template
+        add_submenu_page(
+            'ptm-templates',
+            __('Add New Template', 'post-template-manager'),
+            __('Add New', 'post-template-manager'),
+            'manage_options',
+            'ptm-add-template',
+            [$this, 'add_template_page']
+        );
+        
         // Add submenu pages
         add_submenu_page(
-            'edit.php?post_type=ptm_template',
+            'ptm-templates',
             __('Template Settings', 'post-template-manager'),
             __('Settings', 'post-template-manager'),
             'manage_options',
@@ -46,13 +71,16 @@ class AdminInterface
         );
         
         add_submenu_page(
-            'edit.php?post_type=ptm_template',
+            'ptm-templates',
             __('Template Usage Statistics', 'post-template-manager'),
             __('Usage Stats', 'post-template-manager'),
             'manage_options',
             'ptm-stats',
             [$this, 'stats_page']
         );
+        
+        // Remove the default post type menu since we're creating our own
+        remove_menu_page('edit.php?post_type=ptm_template');
     }
     
     public function admin_init()
@@ -97,6 +125,36 @@ class AdminInterface
             'ptm_settings',
             'ptm_general_settings'
         );
+    }
+    
+    public function templates_page()
+    {
+        // Redirect to the post type list page
+        $redirect_url = admin_url('edit.php?post_type=ptm_template');
+        ?>
+        <script type="text/javascript">
+            window.location.href = '<?php echo esc_js($redirect_url); ?>';
+        </script>
+        <div class="wrap">
+            <h1><?php _e('Post Templates', 'post-template-manager'); ?></h1>
+            <p><?php printf(__('Redirecting to <a href="%s">templates list</a>...', 'post-template-manager'), esc_url($redirect_url)); ?></p>
+        </div>
+        <?php
+    }
+    
+    public function add_template_page()
+    {
+        // Redirect to the add new post page
+        $redirect_url = admin_url('post-new.php?post_type=ptm_template');
+        ?>
+        <script type="text/javascript">
+            window.location.href = '<?php echo esc_js($redirect_url); ?>';
+        </script>
+        <div class="wrap">
+            <h1><?php _e('Add New Template', 'post-template-manager'); ?></h1>
+            <p><?php printf(__('Redirecting to <a href="%s">add new template</a>...', 'post-template-manager'), esc_url($redirect_url)); ?></p>
+        </div>
+        <?php
     }
     
     public function settings_page()
